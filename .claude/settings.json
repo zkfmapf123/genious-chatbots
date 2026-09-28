@@ -1,0 +1,26 @@
+{
+  "enabledPlugins": {
+    "eli5@claude-community": true,
+    "hyperframes@claude-plugins-official": true
+  },
+  "extraKnownMarketplaces": {
+    "claude-community": {
+      "source": {
+        "source": "github",
+        "repo": "anthropics/claude-plugins-community"
+      }
+    }
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/plugins/marketplaces/okf/hooks/kb-search.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
