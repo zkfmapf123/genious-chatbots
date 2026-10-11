@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>관리자</title>
+<style>
+  body{margin:0;font:14px system-ui,sans-serif;background:#0d1312;color:#e4ebe9;padding:0 16px}
+  .wrap{max-width:1100px;margin:0 auto;padding-block:24px 48px;display:flex;flex-direction:column;gap:16px}
+  header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+  h1{font-size:20px;margin:0}
+  header span{color:#95a6a0;font-size:12.5px}
+  a{color:#34c7b5;text-decoration:none}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .stat{background:#151e1c;border:1px solid #2c3a37;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:2px;min-width:0}
+  .stat b{font-size:22px;font-variant-numeric:tabular-nums}
+  .stat span{font-size:12px;color:#95a6a0}
+  .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  input{flex:1;min-width:200px;padding:9px 10px;border-radius:8px;border:1px solid #2c3a37;background:#151e1c;color:inherit;font:inherit}
+  button{padding:9px 14px;border-radius:8px;border:none;background:#34c7b5;color:#0d1312;font-weight:700;cursor:pointer;font:inherit;font-weight:700}
+  #count{color:#95a6a0;font-size:12.5px}
+  .tbl{overflow-x:auto;background:#151e1c;border:1px solid #2c3a37;border-radius:10px}
+  table{border-collapse:collapse;width:100%;min-width:780px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid #2c3a37;vertical-align:top}
+  th{font-size:11.5px;color:#95a6a0;font-weight:500;background:#1c2725;white-space:nowrap}
+  tr.row{cursor:pointer}
+  tr.row:hover td{background:#1a2523}
+  tr.row.open td{background:#1c2725}
+  td.clip{max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  td.num{font-variant-numeric:tabular-nums;white-space:nowrap;color:#95a6a0}
+  .pill{display:inline-block;font-size:11.5px;border-radius:999px;padding:1px 9px;white-space:nowrap}
+  .hit{background:#163322;color:#4fbe73}
+  .llm{background:#123a35;color:#34c7b5}
+  tr.detail td{background:#10171a;padding:14px 16px}
+  .detail .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+  .detail h3{font-size:11.5px;color:#95a6a0;font-weight:500;margin:0 0 4px}
+  .detail pre{margin:0;white-space:pre-wrap;word-break:break-word;font:inherit;line-height:1.55}
+  .pipe{display:flex;gap:6px;align-items:stretch;overflow-x:auto;padding-bottom:4px}
+  .pipe .st{flex:0 0 auto;min-width:130px;max-width:230px;background:#1c2725;border:1px solid #2c3a37;border-radius:8px;padding:7px 9px}
+  .pipe .st.o-hit{border-color:#4fbe73}.pipe .st.o-fail{border-color:#f27b6f}
+  .pipe .st .l{font-weight:700;color:#34c7b5;display:flex;justify-content:space-between;gap:8px;white-space:nowrap}
+  .pipe .st .l i{font-style:normal;font-weight:400;color:#95a6a0;font-size:11px}
+  .pipe .st .d{font-size:11.5px;color:#95a6a0;white-space:pre-wrap;word-break:break-all;margin-top:2px}
+  .pipe .ar{align-self:center;color:#56655f}
+  .pipe .cfg{font-size:11.5px;color:#95a6a0;margin-bottom:6px}
+  .b{display:inline-block;font-size:10.5px;font-weight:700;border-radius:4px;padding:0 6px;margin-top:3px}
+  .b-hit{background:#163322;color:#4fbe73}.b-miss{background:#2c3a37;color:#c3cfca}.b-skip{background:#3a2812;color:#f0a24a}.b-fail{background:#3a1916;color:#f27b6f}.b-ok{background:#123a35;color:#34c7b5}
+  button.del{background:#3a1916;color:#f27b6f}
+  td button.del{margin-top:12px}
+  .empty,.err{padding:28px 16px;text-align:center;color:#95a6a0}
+  .err{color:#f27b6f}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>관리자 <span>질문과 답변 기록</span></h1>
+    <a href="/">← 챗봇</a>
+  </header>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="bar">
+    <input id="q" type="search" placeholder="번호·질문·답변에서 검색..." autocomplete="off">
+    <button id="reload">새로고침</button>
+    <button id="reset" class="del">전체 초기화</button>
+    <span id="count"></span>
+  </div>
+
+  <div class="tbl">
+    <table>
+      <thead><tr><th>#</th><th>시각</th><th>질문</th><th>답변</th><th>처리</th><th>비용</th><th>시간</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div id="msg"></div>
+  </div>
+</div>
+
+<script>
+  // 질문·답변은 사용자가 입력한 값이라 전부 textContent로만 넣는다 (HTML로 해석되지 않게).
+  const $ = (id) => document.getElementById(id);
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  let chats = [];
+
+  function renderStats(s) {
+    const items = [
+      [s.total, "전체 질문"],
+      [s.cached, "캐시 히트 (LLM 생략)"],
+      [s.qaEntries, "캐시 항목 (유효)"],
+      [s.kbChunks, "지식 청크"],
+      ["$" + s.costUsd.toFixed(6), "누적 LLM 비용"],
+    ];
+    $("stats").replaceChildren(...items.map(([v, l]) => {
+      const d = el("div", "stat");
+      d.append(el("b", "", String(v)), el("span", "", l));
+      return d;
+    }));
+  }
+
+  let stats = { total: 0, qaEntries: 0, kbChunks: 0 };
+  const openKeys = new Set(); // 5초마다 다시 그려도 펼쳐 둔 행이 접히지 않게 기억
+  function renderRows() {
+    const kw = $("q").value.trim().toLowerCase();
+    const shown = chats.filter((c) => !kw || (c.id + "\n" + c.question + "\n" + c.answer).toLowerCase().includes(kw.replace(/^#/, "")));
+    $("count").textContent = `${shown.length}건` + (kw ? ` (전체 ${chats.length}건 중)` : "");
+    $("msg").replaceChildren(shown.length ? "" : el("div", "empty", chats.length ? "검색 결과가 없습니다." : "아직 질문이 없습니다. 챗봇에서 질문을 보내면 여기에 쌓입니다."));
+
+    $("rows").replaceChildren(...shown.flatMap((c) => {
+      const row = el("tr", "row");
+      const pill = el("span", "pill " + (c.cached ? "hit" : "llm"), c.cached ? "캐시 히트" : c.inputTokens === 0 && c.outputTokens === 0 ? "안내" : "LLM" + (c.sources ? ` · 문서 ${c.sources}` : ""));
+      const kind = el("td"); kind.append(pill);
+      row.append(
+        el("td", "num", "#" + c.id),
+        el("td", "num", new Date(c.createdAt).toLocaleString("ko-KR")),
+        el("td", "clip", c.question),
+        el("td", "clip", c.answer),
+        kind,
+        el("td", "num", c.cached ? "-" : "$" + c.costUsd.toFixed(6)),
+        el("td", "num", c.totalMs + "ms"),
+      );
+
+      const detail = el("tr", "detail");
+      const key = c.id;
+      detail.hidden = !openKeys.has(key);
+      row.classList.toggle("open", !detail.hidden);
+      const td = el("td"); td.colSpan = 7;
+      const grid = el("div", "grid");
+      for (const [title, text] of [["질문", c.question], ["답변", c.answer]]) {
+        const box = el("div");
+        box.append(el("h3", "", title), el("pre", "", text));
+        grid.append(box);
+      }
+      const meta = el("div");
+      meta.append(el("h3", "", "토큰"), el("pre", "", c.cached ? "캐시 응답 (LLM 호출 없음)" : `in ${c.inputTokens} · out ${c.outputTokens}`));
+      grid.append(meta);
+      td.append(grid);
+      // 이 대화의 파이프라인: 어떤 구간을 어떤 결과로 지났는지 (기록 당시 값)
+      const ev = c.pipeline || [];
+      const box = el("div");
+      box.append(el("h3", "", "파이프라인 · 번호 #" + c.id));
+      const cfg = ev.find((e) => e.type === "config");
+      const steps = ev.filter((e) => e.type === "step");
+      if (!steps.length) box.append(el("pre", "", "기록 없음 (파이프라인 저장 기능 이전의 대화)"));
+      else {
+        if (cfg) {
+          const v = cfg.values;
+          box.append(el("div", "cfg", `임베딩 ${v.embeddingModel} · 캐시 임계값 ${v.cacheMaxDistance} · TTL ${v.cacheTtlHours}h · top-K ${v.kbTopK} · 거리 제한 ${v.kbMaxDistance ?? "없음"} · LLM ${v.mainModel}`));
+        }
+        const pipe = el("div", "pipe");
+        steps.forEach((e, i) => {
+          if (i) pipe.append(el("span", "ar", "→"));
+          const st = el("div", "st" + (e.outcome === "hit" || e.outcome === "fail" ? " o-" + e.outcome : ""));
+          const l = el("div", "l"); l.append(el("span", "", e.label), el("i", "", e.ms + "ms"));
+          st.append(l);
+          if (e.outcome) st.append(el("span", "b b-" + e.outcome, e.outcome.toUpperCase()));
+          st.append(el("div", "d", e.detail || ""));
+          pipe.append(st);
+        });
+        box.append(pipe);
+      }
+      td.append(box);
+      const del = el("button", "del", "이 기록 삭제 (#" + c.id + ")");
+      del.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        if (!confirm(`#${c.id} 기록을 삭제할까요? 되돌릴 수 없습니다.`)) return;
+        del.disabled = true;
+        try {
+          const res = await fetch("/admin/api/chats/" + c.id, { method: "DELETE" });
+          if (!res.ok && res.status !== 404) throw new Error("HTTP " + res.status);
+          openKeys.delete(key);
+          await load();
+        } catch (err) {
+          del.disabled = false;
+          alert("삭제하지 못했습니다: " + err.message);
+        }
+      });
+      td.append(del);
+      detail.append(td);
+
+      row.addEventListener("click", () => {
+        detail.hidden = !detail.hidden;
+        detail.hidden ? openKeys.delete(key) : openKeys.add(key);
+        row.classList.toggle("open", !detail.hidden);
+      });
+      return [row, detail];
+    }));
+  }
+
+  async function load() {
+    $("reload").disabled = true;
+    try {
+      const res = await fetch("/admin/api/chats?limit=200", { cache: "no-store" });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "HTTP " + res.status);
+      const data = await res.json();
+      chats = data.chats;
+      stats = data.stats;
+      renderStats(data.stats);
+      renderRows();
+    } catch (err) {
+      $("msg").replaceChildren(el("div", "err", "불러오지 못했습니다: " + err.message));
+    } finally {
+      $("reload").disabled = false;
+    }
+  }
+
+  // 전체 초기화: 대화 기록 + 질문 캐시 + 지식 문서(임베딩)를 모두 지운다. 지식 문서는 다시 npm run ingest 해야 한다 (임베딩 비용).
+  $("reset").addEventListener("click", async () => {
+    const st = stats;
+    const typed = prompt(
+      `모든 데이터를 삭제합니다 (되돌릴 수 없음).\n\n- 대화 기록 ${st.total}건\n- 질문 캐시 ${st.qaEntries}건\n- 지식 문서 청크 ${st.kbChunks}건 (다시 npm run ingest 필요)\n\n계속하려면 "초기화"를 입력하세요.`,
+    );
+    if (typed !== "초기화") return;
+    $("reset").disabled = true;
+    try {
+      const res = await fetch("/admin/api/reset", { method: "POST" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      openKeys.clear();
+      await load();
+    } catch (err) {
+      alert("초기화하지 못했습니다: " + err.message);
+    } finally {
+      $("reset").disabled = false;
+    }
+  });
+  $("reload").addEventListener("click", load);
+  $("q").addEventListener("input", renderRows);
+  load();
+  setInterval(() => { if (!document.hidden && !$("reload").disabled) load(); }, 5000); // 5초마다 자동 갱신
+</script>
+</body>
+</html>

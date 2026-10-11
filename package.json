@@ -4,13 +4,21 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch --env-file=.env src/server.ts",
-    "start": "node --env-file=.env dist/server.js",
-    "build": "tsc"
+    "dev": "npm run ingest; tsx watch --env-file=.env src/server.ts",
+    "start": "node --env-file=.env dist/ingest.js; node --env-file=.env dist/server.js",
+    "build": "tsc",
+    "ingest": "tsx --env-file=.env src/ingest.ts",
+    "calibrate": "tsx --env-file=.env src/calibrate.ts"
   },
   "devDependencies": {
     "@types/node": "^20.18.0",
+    "@types/pg": "^8.23.1",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1149.0",
+    "@aws-sdk/credential-providers": "^3.1149.0",
+    "pg": "^8.23.1"
   }
 }

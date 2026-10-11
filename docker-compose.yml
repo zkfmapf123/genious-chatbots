@@ -5,3 +5,41 @@ services:
       - "3000:3000"
     env_file:
       - .env
+    environment:
+      POSTGRES_HOST: postgres # 컨테이너 안에서 localhost는 자기 자신이라 서비스 이름으로 접속
+    # 시작할 때 __kb__ 문서를 먼저 적재한다 (바뀐 문서만 재임베딩, 그대로면 임베딩 호출 0회). 적재가 실패해도 서버는 뜬다.
+    command: ["sh", "-c", "node dist/ingest.js; exec node dist/server.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ${HOME}/.aws:/root/.aws:ro # Bedrock 호출용 AWS 자격증명 (읽기 전용). 모든 프로필이 노출됨에 주의
+      - ./jev.json:/app/jev.json:ro # Jev 질문·임계값. 고치면 재시작 없이 다음 질문부터 반영된다
+      - ./__kb__:/app/__kb__:ro # 지식 문서. 이미지에 넣지 않고 마운트해서 문서만 고치고 재시작하면 반영된다
+
+  postgres:
+    image: pgvector/pgvector:pg16 # PostgreSQL 16 + pgvector 설치됨
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro # CREATE EXTENSION vector
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  dozzle:
+    image: amir20/dozzle:latest # 컨테이너 로그를 웹으로 본다 (chatbot, postgres 로그)
+    ports:
+      - "127.0.0.1:8080:8080" # 내 컴퓨터에서만 접속 (로그인 없음)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro # 컨테이너 목록·로그 읽기용. 소켓이라 사실상 docker 접근 권한이 있다는 점에 주의
+
+volumes:
+  pgdata:
