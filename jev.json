@@ -1,27 +1,29 @@
 {
-  "_설명": "Jev(질문 의도 분류) 설정. 서버를 재시작하지 않아도 질문마다 다시 읽는다. questions의 키가 곧 라우트 이름이고, 추가·삭제·이름 변경이 자유다. instructions는 Jev에게 하는 yes/no 질문, yes/no는 각각 '예/아니오'로 볼 기준 설명이다. 질문을 늘리면 입력 토큰이 늘어 비용이 조금 는다 (질문 1개당 약 63토큰).",
+  "_설명": "Jev(질문 의도 분류) 설정. 서버를 재시작하지 않아도 질문마다 다시 읽는다. questions의 키가 곧 이름표(라우트)이고, 같은 이름의 src/condition/<이름표>.ts가 있으면 그 조건이 쓴다. 이름표 항목 필드: instructions(Jev에게 하는 yes/no 질문), yes/no(예/아니오로 볼 기준 설명), threshold(선택: 이 이름표만 쓸 채택 임계값, 없으면 맨 위 threshold), condition(선택: 조건 파일이 읽는 설정). 이름표 동작: deny=안내문으로 막기(condition.message/examples), history=Hindsight 파이프라인. 아무것도 채택되지 않으면 defaultRoutes(default)=기존 RAG 파이프라인. 여러 이름표가 채택되면 아래 questions 순서대로 조건을 검사하고 먼저 응답하는 쪽이 이긴다(deny가 먼저). 질문을 늘리면 입력 토큰이 늘어 비용이 조금 는다 (질문 1개당 약 63토큰). condition은 Jev로 보내지 않아 비용에 영향이 없다.",
   "threshold": 0.5,
-  "defaultRoutes": ["docs"],
+  "defaultRoutes": [
+    "default"
+  ],
   "questions": {
-    "docs": {
-      "instructions": "절차나 사용법을 묻는 질문인가?",
-      "yes": "배포 방법, 설정 방법 같은 how-to 질문",
-      "no": "절차 질문이 아님"
+    "deny": {
+      "instructions": "CI/CD 배포·운영 업무와 무관한 질문인가?",
+      "yes": "인사, 잡담, 음식·날씨처럼 배포나 운영과 상관없는 질문",
+      "no": "배포, CI/CD, 롤백, 장애 대응 같은 업무 관련 질문",
+      "condition": {
+        "message": "저는 CI/CD 배포 절차를 안내하는 챗봇이에요. 절차나 사용법을 물어봐 주세요.",
+        "examples": [
+          "payment-api 배포 절차 알려줘",
+          "롤백은 어떻게 해?",
+          "카나리 배포 중단 기준이 뭐야?",
+          "CrashLoopBackOff 원인이 뭐야?",
+          "핫픽스는 어떻게 배포해?"
+        ]
+      }
     },
-    "recall": {
-      "instructions": "과거에 있었던 사실을 묻는 질문인가?",
-      "yes": "특정 시점에 무슨 일이 있었는지 묻는 질문",
-      "no": "과거 사실 조회가 아님"
-    },
-    "reflect": {
-      "instructions": "원인이나 반복 패턴을 묻는 질문인가?",
-      "yes": "왜 자주 실패하는지, 근본 원인을 묻는 질문",
-      "no": "원인 분석이 아님"
-    },
-    "live": {
-      "instructions": "지금 현재 상태를 묻는 질문인가?",
-      "yes": "지금 prod에 무슨 버전이 떠 있는지 같은 현재 상태 질문",
-      "no": "현재 상태 질문이 아님"
+    "history": {
+      "instructions": "과거에 있었던 사실이나 이력을 묻는 질문인가?",
+      "yes": "특정 시점에 무슨 일이 있었는지, 이전 배포·장애 기록을 묻는 질문",
+      "no": "과거 이력 조회가 아님"
     }
   }
 }

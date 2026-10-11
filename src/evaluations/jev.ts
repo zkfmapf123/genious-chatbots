@@ -10,9 +10,18 @@ const DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
 const CONFIG_PATH = "jev.json";
 
 export type JevConfig = {
-  threshold: number; // 이 확률 이상인 라우트만 채택
+  threshold: number; // 이 확률 이상인 라우트만 채택 (이름표에 threshold가 있으면 그 이름표만 그 값)
   defaultRoutes: Route[]; // 판정 불가·실패 시 보낼 곳
-  questions: Record<Route, { instructions: string; yes: string; no: string }>;
+  questions: Record<
+    Route,
+    {
+      instructions: string;
+      yes: string;
+      no: string;
+      threshold?: number; // 이 이름표만 쓸 임계값
+      condition?: Record<string, unknown>; // src/condition/<이름표>.ts가 읽는 설정 (Jev로는 보내지 않는다)
+    }
+  >;
 };
 
 export type JevResult = {
@@ -20,6 +29,7 @@ export type JevResult = {
   probs: Record<Route, number>; // 라우트별 true 확률 (실패하면 비어 있음)
   inputTokens: number;
   costUsd: number; // 응답의 usage.cost 그대로
+  conditionConfig: Record<Route, Record<string, unknown>>; // 이름표별 condition 설정 (조건 파일에 넘긴다)
   usedDefault: boolean; // 임계값을 넘은 라우트가 없어서 defaultRoutes를 쓴 경우
   failed: boolean; // true면 fallback으로 나온 결과
 };
@@ -34,6 +44,8 @@ export function loadConfig(path = CONFIG_PATH): JevConfig {
   for (const n of names) {
     const q = c.questions[n];
     if (![q?.instructions, q?.yes, q?.no].every((s) => typeof s === "string" && s)) throw new Error(`jev.json: questions.${n}에 instructions/yes/no 문자열이 필요하다`);
+    if (q.threshold !== undefined && (typeof q.threshold !== "number" || q.threshold < 0 || q.threshold > 1)) throw new Error(`jev.json: questions.${n}.threshold는 0~1 숫자여야 한다`);
+    if (q.condition !== undefined && (typeof q.condition !== "object" || q.condition === null || Array.isArray(q.condition))) throw new Error(`jev.json: questions.${n}.condition은 객체여야 한다`);
   }
   return c as JevConfig;
 }
@@ -84,10 +96,10 @@ export class Jev {
     );
 
     // 4. 임계값 넘는 라우트 선택
-    const picked = Object.keys(probs).filter((r) => probs[r] >= cfg.threshold);
     return {
       routes: selectRoutes(probs, cfg),
-      usedDefault: picked.length === 0,
+      conditionConfig: conditionConfigOf(cfg),
+      usedDefault: pickRoutes(probs, cfg).length === 0,
       probs,
       inputTokens: data.usage?.input_tokens ?? 0,
       costUsd: data.usage?.cost ?? 0,
@@ -101,13 +113,23 @@ export class Jev {
     try {
       routes = loadConfig(this.configPath).defaultRoutes;
     } catch {}
-    return { routes, probs: {}, usedDefault: true, inputTokens: 0, costUsd: 0, failed: true };
+    return { routes, probs: {}, conditionConfig: {}, usedDefault: true, inputTokens: 0, costUsd: 0, failed: true };
   }
 }
 
+/** 이름표별 condition 설정만 모은다 (없는 이름표는 빈 객체). */
+function conditionConfigOf(cfg: JevConfig) {
+  return Object.fromEntries(Object.entries(cfg.questions).map(([r, q]) => [r, q.condition ?? {}]));
+}
+
+/** 임계값을 넘은 라우트들. 이름표에 threshold가 있으면 그 값, 없으면 전체 threshold. */
+function pickRoutes(probs: Record<Route, number>, cfg: Pick<JevConfig, "threshold" | "questions">): Route[] {
+  return Object.keys(probs).filter((r) => probs[r] >= (cfg.questions[r]?.threshold ?? cfg.threshold));
+}
+
 /** 라우트별 확률 -> 채택할 라우트. 하나도 임계값을 못 넘으면 기본 라우트. */
-export function selectRoutes(probs: Record<Route, number>, cfg: Pick<JevConfig, "threshold" | "defaultRoutes">): Route[] {
-  const routes = Object.keys(probs).filter((r) => probs[r] >= cfg.threshold);
+export function selectRoutes(probs: Record<Route, number>, cfg: Pick<JevConfig, "threshold" | "defaultRoutes" | "questions">): Route[] {
+  const routes = pickRoutes(probs, cfg);
   return routes.length > 0 ? routes : cfg.defaultRoutes;
 }
 
@@ -115,10 +137,12 @@ export function selectRoutes(probs: Record<Route, number>, cfg: Pick<JevConfig, 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const cfg = loadConfig();
   const eq = (a: Route[], b: Route[]) => JSON.stringify(a) === JSON.stringify(b);
-  console.assert(eq(selectRoutes({ docs: 0.9 }, cfg), ["docs"]), "docs only");
-  console.assert(eq(selectRoutes({ docs: 0.8, recall: 0.7 }, cfg), ["docs", "recall"]), "mixed");
-  console.assert(eq(selectRoutes({ live: 0.2 }, cfg), cfg.defaultRoutes), "below threshold -> default");
+  console.assert(eq(selectRoutes({ deny: 0.9 }, cfg), ["deny"]), "single");
+  console.assert(eq(selectRoutes({ deny: 0.8, history: 0.7 }, cfg), ["deny", "history"]), "mixed");
+  console.assert(eq(selectRoutes({ history: 0.2 }, cfg), cfg.defaultRoutes), "below threshold -> default");
   console.assert(eq(selectRoutes({}, cfg), cfg.defaultRoutes), "empty -> default");
+  const per = { ...cfg, threshold: 0.5, questions: { ...cfg.questions, deny: { ...cfg.questions.deny, threshold: 0.3 } } };
+  console.assert(eq(selectRoutes({ deny: 0.4, history: 0.4 }, per), ["deny"]), "per-tag threshold: deny 0.3 passes, history uses global 0.5");
   const bad = await new Jev("invalid-key").run("테스트");
   console.assert(bad.failed && eq(bad.routes, cfg.defaultRoutes), "api error -> fallback");
   console.assert((await new Jev("x", "m", "/nonexistent.json").run("t")).failed, "missing config -> fallback");

@@ -5,6 +5,7 @@ import { ChatLog } from "./chatLog.js";
 import { Jev } from "./evaluations/jev.js";
 import { loadConditions, runConditions } from "./condition/index.js";
 import { MainModel } from "./mainModel.js";
+import { Hindsight } from "./pipeline/hindsight.js";
 import { KnowledgeBase } from "./pipeline/knowledgeBase.js";
 import { SemanticCache } from "./pipeline/semanticCache.js";
 import { createEmbedder, createPool, num } from "./pipeline/setup.js";
@@ -27,6 +28,7 @@ if (!API_KEY || !MODEL) {
 const OPEN_ROUTER_KEY = process.env.OPEN_ROUTER_KEY;
 const jev = OPEN_ROUTER_KEY ? new Jev(OPEN_ROUTER_KEY, process.env.JUDGE_MODEL || undefined) : undefined; // 키가 없으면 Jev 단계는 건너뛴다
 const conditions = await loadConditions(); // src/condition/<번호>_*.ts
+const hindsight = new Hindsight();
 const embedder = createEmbedder();
 const pool = createPool();
 const mainModel = new MainModel(API_KEY, MODEL);
@@ -147,30 +149,59 @@ const server = createServer(async (req, res) => {
       ms: lap(),
     });
 
-    // 2. 조건: 채택된 Jev 라우트(이름표)마다 src/condition/<이름표>.ts를 검사. reply를 돌려주면 그 답을 바로 내보내고 끝낸다
-    //    (임베딩·캐시·LLM 없음, qa_cache에도 저장 안 함). 파일이 없거나 undefined면 통과해서 평소 흐름으로 간다.
+    // 2. 조건: 채택된 Jev 라우트(이름표)마다 src/condition/<이름표>.ts를 검사한다. 결과는 세 가지:
+    //    reply -> 그 답을 바로 내보내고 끝 (임베딩·캐시·LLM 없음, qa_cache에도 저장 안 함)
+    //    pipeline: hindsight -> 아래 Hindsight 단계로 (실패하면 기존 RAG로 이어짐)
+    //    없음(통과) -> 기존 RAG 파이프라인 (임베딩 -> 캐시 -> 지식 검색 -> LLM)
     emit({ type: "step-start", label: "조건" });
     const cond = decision ? runConditions(conditions, { message, decision }) : undefined;
-    const matched = cond?.reply !== undefined ? { route: cond.route, name: cond.name, reply: cond.reply } : undefined;
+    const result = cond?.result;
     emit({
       type: "step",
       label: "조건",
-      outcome: !decision ? "skip" : matched ? "hit" : "miss",
+      outcome: !decision ? "skip" : result ? "hit" : "miss",
       detail: !decision
         ? "건너뜀 (Jev 없음)"
-        : matched
-          ? `${matched.route}.ts\n${matched.name} -> 안내 응답 (임베딩·캐시·LLM 건너뜀)`
-          : `라우트 ${decision.routes.join(", ")}\n${cond!.checked.length ? `${cond!.checked.map((r) => r + ".ts").join(", ")} 검사: 통과` : "해당 조건 파일 없음: 통과"} -> 다음 단계`,
+        : result
+          ? `${cond!.route}.ts\n${cond!.name} -> ${"reply" in result ? "안내 응답 (임베딩·캐시·LLM 건너뜀)" : "Hindsight 파이프라인"}`
+          : `라우트 ${decision.routes.join(", ")}\n${cond!.checked.length ? `${cond!.checked.map((r) => r + ".ts").join(", ")} 검사: 통과` : "해당 조건 파일 없음"} -> 기존 RAG 파이프라인`,
       ms: lap(),
     });
-    if (matched) {
-      emit({ type: "done", reply: matched.reply, guided: true, cache: "skip", answerMs: Math.round(performance.now() - t0), usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 } });
+    if (result && "reply" in result) {
+      emit({ type: "done", reply: result.reply, guided: true, cache: "skip", answerMs: Math.round(performance.now() - t0), usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 } });
       const guidedId = await chatLog.record({
-        question: message, answer: matched.reply, cached: false, sources: 0,
+        question: message, answer: result.reply, cached: false, sources: 0,
         inputTokens: 0, outputTokens: 0, costUsd: 0, totalMs: Math.round(performance.now() - t0), pipeline: trace,
       });
       if (guidedId) emit({ type: "chat-id", id: guidedId });
       return;
+    }
+
+    // 2-1. Hindsight 파이프라인 (history): 기억을 찾으면 그것만 context로 답한다. 못 찾거나 실패하면 아래 기존 RAG로 이어진다.
+    if (result && "pipeline" in result) {
+      emit({ type: "step-start", label: "Hindsight" });
+      const h = await hindsight.run(message);
+      emit({
+        type: "step",
+        label: "Hindsight",
+        outcome: h.failed ? "fail" : h.memories.length ? "hit" : "miss",
+        detail: h.failed ? "실패 -> 기존 RAG 파이프라인으로 (fallback)" : h.memories.length ? `기억 ${h.memories.length}건` : "관련 기억 없음 -> 기존 RAG 파이프라인으로",
+        ms: lap(),
+      });
+      if (h.memories.length) {
+        emit({ type: "step-start", label: "main-model", detail: MODEL });
+        const ctxMem = h.memories.map((m, i) => `[${i + 1}] (hindsight)\n${m}`);
+        const r = await mainModel.run(message, ctxMem);
+        const cost = calcCost(MODEL, r.inputTokens, r.outputTokens);
+        emit({ type: "step", label: "main-model", detail: `${MODEL}\ncontext 기억 ${ctxMem.length}건`, ms: lap() });
+        emit({ type: "done", reply: r.content, cache: "skip", answerMs: Math.round(performance.now() - t0), usage: { inputTokens: r.inputTokens, outputTokens: r.outputTokens, costUsd: cost } });
+        const hid = await chatLog.record({
+          question: message, answer: r.content, cached: false, sources: ctxMem.length,
+          inputTokens: r.inputTokens, outputTokens: r.outputTokens, costUsd: cost, totalMs: Math.round(performance.now() - t0), pipeline: trace,
+        });
+        if (hid) emit({ type: "chat-id", id: hid });
+        return;
+      }
     }
 
     // 3. 질문 임베딩: 한 번만 만들어서 캐시 조회, 지식 검색, 캐시 저장에 같이 쓴다. 실패하면 null -> 아래 단계들이 건너뜀
