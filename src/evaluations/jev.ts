@@ -1,5 +1,5 @@
 // Jev 1.13 (OpenRouter Decisions API) - 질문 의도 분류. 분류만 하고 답변은 안 만듦.
-// 정리 문서: .claude/rules/jev.md   질문·임계값 설정: jev.json (질문마다 다시 읽는다)
+// 정리 문서: .claude/rules/jev.md   질문·임계값 설정: config/jev.json (질문마다 다시 읽는다)
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -7,7 +7,7 @@ export type Route = string; // jev.json의 questions 키
 
 // 주의: 공식 문서 curl 예시의 /api/v1/api/alpha/decisions 는 404. 실제 경로는 아래 (2026-10 실측)
 const DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
-const CONFIG_PATH = "jev.json";
+const CONFIG_PATH = "config/jev.json";
 
 export type JevConfig = {
   threshold: number; // 이 확률 이상인 라우트만 채택 (이름표에 threshold가 있으면 그 이름표만 그 값)

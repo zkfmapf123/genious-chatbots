@@ -31,6 +31,8 @@
   .pill{display:inline-block;font-size:11.5px;border-radius:999px;padding:1px 9px;white-space:nowrap}
   .hit{background:#163322;color:#4fbe73}
   .llm{background:#123a35;color:#34c7b5}
+  .none{background:#3a2812;color:#f0a24a}
+  label.f{display:flex;gap:6px;align-items:center;font-size:12.5px;color:#95a6a0;white-space:nowrap}
   tr.detail td{background:#10171a;padding:14px 16px}
   .detail .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
   .detail h3{font-size:11.5px;color:#95a6a0;font-weight:500;margin:0 0 4px}
@@ -62,6 +64,7 @@
 
   <div class="bar">
     <input id="q" type="search" placeholder="번호·질문·답변에서 검색..." autocomplete="off">
+    <label class="f"><input id="nc" type="checkbox" style="flex:none;min-width:0;width:auto;padding:0"> 근거 없음만</label>
     <button id="reload">새로고침</button>
     <button id="reset" class="del">전체 초기화</button>
     <span id="count"></span>
@@ -92,6 +95,7 @@
     const items = [
       [s.total, "전체 질문"],
       [s.cached, "캐시 히트 (LLM 생략)"],
+      [s.noContext, "근거 없음 (문서 보강 필요)"],
       [s.qaEntries, "캐시 항목 (유효)"],
       [s.kbChunks, "지식 청크"],
       ["$" + s.costUsd.toFixed(6), "누적 LLM 비용"],
@@ -107,13 +111,14 @@
   const openKeys = new Set(); // 5초마다 다시 그려도 펼쳐 둔 행이 접히지 않게 기억
   function renderRows() {
     const kw = $("q").value.trim().toLowerCase();
-    const shown = chats.filter((c) => !kw || (c.id + "\n" + c.question + "\n" + c.answer).toLowerCase().includes(kw.replace(/^#/, "")));
+    const onlyNone = $("nc").checked;
+    const shown = chats.filter((c) => (!onlyNone || c.noContext) && (!kw || (c.id + "\n" + c.question + "\n" + c.answer).toLowerCase().includes(kw.replace(/^#/, ""))));
     $("count").textContent = `${shown.length}건` + (kw ? ` (전체 ${chats.length}건 중)` : "");
     $("msg").replaceChildren(shown.length ? "" : el("div", "empty", chats.length ? "검색 결과가 없습니다." : "아직 질문이 없습니다. 챗봇에서 질문을 보내면 여기에 쌓입니다."));
 
     $("rows").replaceChildren(...shown.flatMap((c) => {
       const row = el("tr", "row");
-      const pill = el("span", "pill " + (c.cached ? "hit" : "llm"), c.cached ? "캐시 히트" : c.inputTokens === 0 && c.outputTokens === 0 ? "안내" : "LLM" + (c.sources ? ` · 문서 ${c.sources}` : ""));
+      const pill = el("span", "pill " + (c.noContext ? "none" : c.cached ? "hit" : "llm"), c.noContext ? "근거 없음" : c.cached ? "캐시 히트" : c.inputTokens === 0 && c.outputTokens === 0 ? "안내" : "LLM" + (c.sources ? ` · 문서 ${c.sources}` : ""));
       const kind = el("td"); kind.append(pill);
       row.append(
         el("td", "num", "#" + c.id),
@@ -230,6 +235,7 @@
   });
   $("reload").addEventListener("click", load);
   $("q").addEventListener("input", renderRows);
+  $("nc").addEventListener("change", renderRows);
   load();
   setInterval(() => { if (!document.hidden && !$("reload").disabled) load(); }, 5000); // 5초마다 자동 갱신
 </script>

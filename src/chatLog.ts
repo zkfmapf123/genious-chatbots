@@ -10,6 +10,7 @@ export type ChatEntry = {
   outputTokens: number;
   costUsd: number;
   totalMs: number;
+  noContext?: boolean; // 지식 검색이 0건이라 모델 없이 "모른다"고 답했는지 (/admin에서 문서 보강 대상으로 모아 본다)
   pipeline?: object[]; // 그 턴에 화면에 보여준 단계 이벤트(config + step) 그대로. 관리자에서 흐름을 다시 본다
 };
 
@@ -27,6 +28,7 @@ const SCHEMA = `
     created_at    timestamptz NOT NULL DEFAULT now()
   );
   ALTER TABLE chat_log ADD COLUMN IF NOT EXISTS pipeline jsonb;
+  ALTER TABLE chat_log ADD COLUMN IF NOT EXISTS no_context boolean NOT NULL DEFAULT false;
 `;
 
 export class ChatLog {
@@ -42,9 +44,9 @@ export class ChatLog {
     try {
       await this.ensureSchema();
       const { rows } = await this.pool.query<{ id: string }>(
-        `INSERT INTO chat_log (question, answer, cached, sources, input_tokens, output_tokens, cost_usd, total_ms, pipeline)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-        [e.question, e.answer, e.cached, e.sources, e.inputTokens, e.outputTokens, e.costUsd, e.totalMs, JSON.stringify(e.pipeline ?? [])],
+        `INSERT INTO chat_log (question, answer, cached, sources, input_tokens, output_tokens, cost_usd, total_ms, pipeline, no_context)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+        [e.question, e.answer, e.cached, e.sources, e.inputTokens, e.outputTokens, e.costUsd, e.totalMs, JSON.stringify(e.pipeline ?? []), e.noContext ?? false],
       );
       return Number(rows[0].id);
     } catch (err) {
@@ -60,7 +62,7 @@ export class ChatLog {
     const { rows } = await this.pool.query(
       `SELECT id, question, answer, cached, sources,
               input_tokens AS "inputTokens", output_tokens AS "outputTokens",
-              cost_usd AS "costUsd", total_ms AS "totalMs", pipeline, created_at AS "createdAt"
+              cost_usd AS "costUsd", total_ms AS "totalMs", pipeline, no_context AS "noContext", created_at AS "createdAt"
          FROM chat_log ORDER BY id DESC LIMIT $1`,
       [n],
     );
@@ -94,13 +96,13 @@ export class ChatLog {
   async stats() {
     await this.ensureSchema();
     const { rows: [c] } = await this.pool.query(
-      `SELECT count(*)::int AS total, (count(*) FILTER (WHERE cached))::int AS cached,
+      `SELECT count(*)::int AS total, (count(*) FILTER (WHERE cached))::int AS cached, (count(*) FILTER (WHERE no_context))::int AS "noContext",
               coalesce(sum(cost_usd), 0)::float AS "costUsd" FROM chat_log`,
     );
     const { rows: [t] } = await this.pool.query(`SELECT to_regclass('qa_cache') IS NOT NULL AS qa, to_regclass('kb_chunks') IS NOT NULL AS kb`);
     const qaEntries = t.qa ? (await this.pool.query("SELECT count(*)::int AS n FROM qa_cache WHERE expires_at > now()")).rows[0].n : 0;
     const kbChunks = t.kb ? (await this.pool.query("SELECT count(*)::int AS n FROM kb_chunks")).rows[0].n : 0;
-    return { total: c.total as number, cached: c.cached as number, costUsd: c.costUsd as number, qaEntries: qaEntries as number, kbChunks: kbChunks as number };
+    return { total: c.total as number, cached: c.cached as number, noContext: c.noContext as number, costUsd: c.costUsd as number, qaEntries: qaEntries as number, kbChunks: kbChunks as number };
   }
 
   private ensureSchema() {

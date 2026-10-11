@@ -7,6 +7,7 @@ import { loadConditions, runConditions } from "./condition/index.js";
 import { MainModel } from "./mainModel.js";
 import { Hindsight } from "./pipeline/hindsight.js";
 import { KnowledgeBase } from "./pipeline/knowledgeBase.js";
+import { loadRagConfig } from "./pipeline/ragConfig.js";
 import { SemanticCache } from "./pipeline/semanticCache.js";
 import { createEmbedder, createPool, num } from "./pipeline/setup.js";
 
@@ -265,6 +266,33 @@ const server = createServer(async (req, res) => {
                 .join("\n"),
       ms: lap(),
     });
+
+    // 5-1. 근거 확인: 문서를 한 건도 못 찾았으면 모델을 부르지 않고 "모른다, 담당자 문의"로 답한다.
+    //      모델이 일반 지식으로 지어내는 걸 막는다. 이 답은 캐시에 저장하지 않는다 (나중에 문서를 추가해도 옛 "모른다"가 남지 않게).
+    //      검색 자체가 못 돌았으면(임베딩·검색 실패) "찾지 못했다"가 아니라 "지금은 검색할 수 없다"고 답한다.
+    if (found.hits.length === 0) {
+      const rag = loadRagConfig();
+      const unavailable = found.skipped || found.failed;
+      const reply = unavailable ? rag.unavailableText : rag.noAnswerText;
+      emit({
+        type: "step",
+        label: "근거 확인",
+        outcome: unavailable ? "fail" : "miss",
+        detail: unavailable ? "문서를 검색하지 못함 -> 모델 호출 없이 안내" : "관련 문서 0건 -> 모델 호출 없이 \"모른다, 담당자 문의\"로 답함",
+        ms: lap(),
+      });
+      emit({
+        type: "done", reply, cache: "skip", answerMs: Math.round(performance.now() - t0),
+        ...(unavailable ? { guided: true } : { noContext: true }),
+        usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+      });
+      const noCtxId = await chatLog.record({
+        question: message, answer: reply, cached: false, sources: 0, noContext: !unavailable,
+        inputTokens: 0, outputTokens: 0, costUsd: 0, totalMs: Math.round(performance.now() - t0), pipeline: trace,
+      });
+      if (noCtxId) emit({ type: "chat-id", id: noCtxId });
+      return;
+    }
 
     // 6. 답변 생성: 찾은 청크에 [1], [2] 번호를 붙여 context로 넘긴다
     emit({ type: "step-start", label: "main-model", detail: MODEL });

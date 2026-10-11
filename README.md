@@ -9,28 +9,20 @@ npm run dev        # http://localhost:3000
 
 `.env`에 `PROVIDER`, `PROVIDER_PRIVATE_KEY`, `CHATBOT_MAIN_MODEL` 필요.
 
-## Hindsight 서버 띄우기
+## Hindsight (장기 기억)
 
-recall/reflect용 [Hindsight](https://github.com/vectorize-io/hindsight) 서버. 아직 코드에서 연결은 안 했고, `src/pipeline/hindsight.ts`가 여길 호출할 예정.
+`docker-compose.yml`의 `hindsight` 서비스 (`ghcr.io/vectorize-io/hindsight`). Jev가 `history`로 판정한 질문이 여기로 간다 (`src/pipeline/hindsight.ts`의 `recall`).
 
 ```bash
-docker run -it --pull always --name hindsight --restart unless-stopped \
-  --shm-size=1g -p 8888:8888 -p 9999:9999 \
-  -e HINDSIGHT_API_LLM_PROVIDER=openai \
-  -e HINDSIGHT_API_LLM_API_KEY=$PROVIDER_PRIVATE_KEY \
-  -e HINDSIGHT_API_LLM_MODEL=gpt-4o-mini \
-  -e HINDSIGHT_API_EMBEDDINGS_PROVIDER=openai \
-  -e HINDSIGHT_API_EMBEDDINGS_OPENAI_API_KEY=$PROVIDER_PRIVATE_KEY \
-  -e HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL=text-embedding-3-small \
-  -v hindsight-data:/home/hindsight/.pg0 \
-  ghcr.io/vectorize-io/hindsight:latest
+docker-compose up -d hindsight   # 처음에는 이미지(약 3.5GB)를 받느라 오래 걸린다
+curl http://localhost:8888/health
 ```
 
-- API 서버: http://localhost:8888
-- Control Plane(Web UI): http://localhost:9999
-- `.env`의 `PROVIDER_PRIVATE_KEY`(OpenAI 키)를 그대로 재사용 — Hindsight 전용 LLM/임베딩 provider 설정이라 우리 챗봇 설정과는 별개.
-- 이미지는 full(~9GB, embedding 내장). slim(~500MB)은 외부 embedding/reranker 설정이 필수라 지금은 안 씀.
-- 기동 확인: `curl http://localhost:8888/health`, 또는 `docker logs hindsight | grep "Started server"`
+- API: http://localhost:8888 (경로 목록은 `/openapi.json`), Control Plane(Web UI): http://localhost:9999. 둘 다 `127.0.0.1`에만 열려 있고 로그인이 없다.
+- 기억 LLM은 `.env`의 `PROVIDER_PRIVATE_KEY`(OpenAI 키)를 재사용한다. 모델은 `HINDSIGHT_LLM_MODEL`(기본 `gpt-4o-mini`). 챗봇 모델과는 별개 설정이다.
+- 기억은 `hindsight-data` 볼륨에 저장된다. `docker-compose down -v`는 이 기억도 지운다.
+- bank 이름은 `HINDSIGHT_BANK`(기본 `chatbot`). 첫 recall 때 없으면 서버가 만든다.
+- **아직 기억을 넣는(retain) 코드는 없다.** 그래서 지금은 recall이 항상 비어 있고 `history` 질문은 `Hindsight MISS` 후 기존 RAG로 이어진다.
 
 ## PostgreSQL (pgvector)
 

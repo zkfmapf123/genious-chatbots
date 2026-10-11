@@ -250,7 +250,9 @@
           t.answerMs = evt.answerMs;
           renderHead(t, view);
           const u = evt.usage;
-          let text = evt.guided
+          let text = evt.noContext
+            ? "근거 없음 응답 (문서 0건, LLM 호출 없음)"
+            : evt.guided
             ? "안내 응답 (LLM·캐시 없음)"
             : evt.cached
             ? "캐시 응답 (LLM 호출 없음)"

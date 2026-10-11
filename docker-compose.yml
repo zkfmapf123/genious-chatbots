@@ -7,6 +7,7 @@ services:
       - .env
     environment:
       POSTGRES_HOST: postgres # 컨테이너 안에서 localhost는 자기 자신이라 서비스 이름으로 접속
+      HINDSIGHT_URL: http://hindsight:8888 # history 라우트가 부르는 Hindsight 주소
     # 시작할 때 __kb__ 문서를 먼저 적재한다 (바뀐 문서만 재임베딩, 그대로면 임베딩 호출 0회). 적재가 실패해도 서버는 뜬다.
     command: ["sh", "-c", "node dist/ingest.js; exec node dist/server.js"]
     depends_on:
@@ -14,7 +15,9 @@ services:
         condition: service_healthy
     volumes:
       - ${HOME}/.aws:/root/.aws:ro # Bedrock 호출용 AWS 자격증명 (읽기 전용). 모든 프로필이 노출됨에 주의
-      - ./jev.json:/app/jev.json:ro # Jev 질문·임계값. 고치면 재시작 없이 다음 질문부터 반영된다
+      # 설정 파일(jev.json, hindsight.json). 고치면 재시작 없이 다음 질문부터 반영된다.
+      # 파일이 아니라 폴더째 마운트한다: 파일 하나만 마운트하면 colima에서 파일이 길어질 때 뒷부분이 잘려 보인다(실측).
+      - ./config:/app/config:ro
       - ./__kb__:/app/__kb__:ro # 지식 문서. 이미지에 넣지 않고 마운트해서 문서만 고치고 재시작하면 반영된다
 
   postgres:
@@ -41,5 +44,19 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro # 컨테이너 목록·로그 읽기용. 소켓이라 사실상 docker 접근 권한이 있다는 점에 주의
 
+  hindsight:
+    image: ghcr.io/vectorize-io/hindsight:latest # 장기 기억(retain/recall/reflect). full 이미지(~9GB)라 처음 받을 때 오래 걸린다
+    shm_size: 1g
+    ports:
+      - "127.0.0.1:8888:8888" # REST API (내 컴퓨터에서만)
+      - "127.0.0.1:9999:9999" # Control Plane(Web UI)
+    environment:
+      HINDSIGHT_API_LLM_PROVIDER: openai
+      HINDSIGHT_API_LLM_API_KEY: ${PROVIDER_PRIVATE_KEY} # .env의 OpenAI 키를 재사용 (Hindsight 전용 LLM 설정이라 챗봇 모델과는 별개)
+      HINDSIGHT_API_LLM_MODEL: ${HINDSIGHT_LLM_MODEL:-gpt-4o-mini}
+    volumes:
+      - hindsight-data:/home/hindsight/.pg0 # 기억 데이터 (내장 postgres). 재시작해도 유지
+
 volumes:
   pgdata:
+  hindsight-data:

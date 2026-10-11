@@ -1,0 +1,13 @@
+{
+  "_설명": "Hindsight(장기 기억) 설정. 서버를 재시작하지 않아도 질문마다 다시 읽는다. 서버 주소는 환경마다 달라서 .env의 HINDSIGHT_URL로 둔다(compose는 http://hindsight:8888). bank: 기억 저장소 이름. timeoutMs: 응답이 이보다 늦으면 포기하고 기존 RAG로 넘어간다. recall.maxTokens: 한 번에 가져올 기억의 토큰 상한. bankConfig: bank를 만들거나 고칠 때 그대로 보내는 설정(Hindsight PUT /v1/default/banks/{bank}의 필드). 값을 바꾸면 다음 질문에서 bank에 다시 반영된다. 자주 쓰는 필드: retain_mission(기억을 넣을 때 무엇을 뽑을지), reflect_mission(reflect가 어떻게 해석할지), retain_extraction_mode(concise=요약(기본), verbatim=원문 그대로, custom), retain_custom_instructions(custom일 때의 지시문), enable_observations, enable_text_search, enable_temporal_retrieval, enable_graph_retrieval, enable_reranking.",
+  "bank": "chatbot",
+  "timeoutMs": 5000,
+  "recall": {
+    "maxTokens": 1500
+  },
+  "bankConfig": {
+    "retain_mission": "CI/CD 배포와 장애 이력에서 서비스 이름, 배포 버전, 시각, 결과(성공·롤백), 원인, 조치를 뽑는다.",
+    "reflect_mission": "CI/CD 배포·운영 챗봇의 기억을 바탕으로 과거 배포·장애 이력과 반복되는 원인을 한국어로 정리한다."
+  }
+}
+
